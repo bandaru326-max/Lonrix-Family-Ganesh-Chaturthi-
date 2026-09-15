@@ -19,10 +19,17 @@ const DATA_FILE = path.join(__dirname, 'data', 'members.json');
 
 app.use(cors());
 app.use(express.json());
+
+// Serve static assets from public/ and root
+app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(__dirname));
 
-// Serve index.html explicitly at root URL for Vercel & Express
+// Serve index.html explicitly at root URL
 app.get('/', (req, res) => {
+  const publicIndex = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(publicIndex)) {
+    return res.sendFile(publicIndex);
+  }
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
