@@ -21,10 +21,19 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// Ensure data folder exists
+// Serve index.html explicitly at root URL for Vercel & Express
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Ensure data folder exists locally
 const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+  } catch (e) {
+    // Ignore error in read-only environment
+  }
 }
 
 // Function to generate initial 100 rows
@@ -67,11 +76,16 @@ function loadData() {
 
 function saveData() {
   try {
-    // Re-index S.No cleanly
     members.forEach((m, idx) => {
       m.sno = idx + 1;
     });
-    fs.writeFileSync(DATA_FILE, JSON.stringify(members, null, 2), 'utf8');
+    try {
+      fs.writeFileSync(DATA_FILE, JSON.stringify(members, null, 2), 'utf8');
+    } catch (writeErr) {
+      // Fallback for Vercel serverless read-only filesystem
+      const tmpFile = path.join('/tmp', 'members.json');
+      fs.writeFileSync(tmpFile, JSON.stringify(members, null, 2), 'utf8');
+    }
   } catch (err) {
     console.error('Error saving data file:', err);
   }
@@ -81,9 +95,51 @@ loadData();
 
 let activeSocketsCount = 0;
 
-// REST API fallback endpoints
+// REST API endpoints for Vercel Serverless compatibility
 app.get('/api/members', (req, res) => {
-  res.json({ success: true, members, activeUsers: activeSocketsCount });
+  res.json({ success: true, members, activeUsers: Math.max(1, activeSocketsCount) });
+});
+
+app.post('/api/members/cell', (req, res) => {
+  const { id, field, value } = req.body;
+  const member = members.find(m => m.id === id);
+  if (member && ['memberName', 'familyNames', 'gothram'].includes(field)) {
+    member[field] = value;
+    member.updatedAt = new Date().toISOString();
+    saveData();
+    io.emit('cell_updated', { id, field, value, updatedAt: member.updatedAt });
+    return res.json({ success: true, member, members });
+  }
+  res.status(400).json({ success: false, message: 'Invalid member or field' });
+});
+
+app.post('/api/members/add', (req, res) => {
+  const newId = `mem_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const newRow = {
+    id: newId,
+    sno: members.length + 1,
+    memberName: '',
+    familyNames: '',
+    gothram: '',
+    updatedAt: new Date().toISOString()
+  };
+  members.push(newRow);
+  saveData();
+  io.emit('row_added', { newRow, members });
+  res.json({ success: true, newRow, members });
+});
+
+app.post('/api/members/delete', (req, res) => {
+  const { id } = req.body;
+  const index = members.findIndex(m => m.id === id);
+  if (index !== -1) {
+    members.splice(index, 1);
+    members.forEach((m, idx) => { m.sno = idx + 1; });
+    saveData();
+    io.emit('row_deleted', { id, members });
+    return res.json({ success: true, members });
+  }
+  res.status(404).json({ success: false, message: 'Member not found' });
 });
 
 app.post('/api/members', (req, res) => {
@@ -101,17 +157,14 @@ io.on('connection', (socket) => {
   activeSocketsCount++;
   console.log(`Client connected: ${socket.id} (Total online: ${activeSocketsCount})`);
   
-  // Send current state to newly connected client
   socket.emit('init_state', {
     members,
     activeUsers: activeSocketsCount,
     socketId: socket.id
   });
 
-  // Broadcast updated active count to everyone
   io.emit('presence_update', { activeUsers: activeSocketsCount });
 
-  // Handle live cell editing
   socket.on('edit_cell', (data) => {
     const { id, field, value } = data;
     const member = members.find(m => m.id === id);
@@ -120,7 +173,6 @@ io.on('connection', (socket) => {
       member.updatedAt = new Date().toISOString();
       saveData();
 
-      // Broadcast update to all other connected clients immediately
       socket.broadcast.emit('cell_updated', {
         id,
         field,
@@ -131,7 +183,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Broadcast cell focus/editing indicator (shows who is typing where)
   socket.on('typing_focus', (data) => {
     socket.broadcast.emit('remote_typing', {
       socketId: socket.id,
@@ -141,7 +192,6 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Handle adding a new row
   socket.on('add_row', () => {
     const newId = `mem_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
     const newRow = {
@@ -158,26 +208,15 @@ io.on('connection', (socket) => {
     io.emit('row_added', { newRow, members });
   });
 
-  // Handle deleting a row safely
   socket.on('delete_row', (data) => {
     const { id } = data;
     const index = members.findIndex(m => m.id === id);
     if (index !== -1) {
       members.splice(index, 1);
-      // Re-index serial numbers
       members.forEach((m, idx) => { m.sno = idx + 1; });
       saveData();
       io.emit('row_deleted', { id, members });
     }
-  });
-
-  // Handle full sync request
-  socket.on('request_sync', () => {
-    socket.emit('init_state', {
-      members,
-      activeUsers: activeSocketsCount,
-      socketId: socket.id
-    });
   });
 
   socket.on('disconnect', () => {
@@ -187,10 +226,10 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`===================================================`);
-  console.log(` Ganesh Chaturthi Family Web App is Live! `);
-  console.log(` Open in browser: http://localhost:${PORT}`);
-  console.log(` Local Network URL: http://<your-ip>:${PORT}`);
-  console.log(`===================================================`);
-});
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`Ganesh Chaturthi Web App running on port ${PORT}`);
+  });
+}
+
+module.exports = app;

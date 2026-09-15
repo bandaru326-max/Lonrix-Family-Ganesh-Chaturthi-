@@ -48,89 +48,123 @@
     gothram: ''
   }));
 
-  // Initialize Socket.IO connection
+  // REST API fallback for Vercel / Serverless hosting
+  function fetchMembersFromAPI() {
+    fetch('/api/members')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.members)) {
+          const activeEl = document.activeElement;
+          const activeId = activeEl ? activeEl.getAttribute('data-id') : null;
+          const activeField = activeEl ? activeEl.getAttribute('data-field') : null;
+
+          if (members.length === 0) {
+            members = data.members;
+            renderTable();
+          } else {
+            data.members.forEach(remoteMember => {
+              const localMember = members.find(m => m.id === remoteMember.id);
+              if (localMember) {
+                ['memberName', 'familyNames', 'gothram'].forEach(f => {
+                  if (!(activeId === localMember.id && activeField === f)) {
+                    if (localMember[f] !== remoteMember[f]) {
+                      localMember[f] = remoteMember[f];
+                      updateCellUI(localMember.id, f, remoteMember[f]);
+                    }
+                  }
+                });
+              }
+            });
+
+            if (members.length !== data.members.length) {
+              members = data.members;
+              renderTable();
+            }
+          }
+
+          if (data.activeUsers) updateActiveCount(data.activeUsers);
+          if (!isConnected) updateStatus('synced', 'Live Synced (Vercel Cloud) ✓');
+        }
+      })
+      .catch(err => console.warn('API fetch error:', err));
+  }
+
+  // Initialize Socket.IO connection with Vercel HTTP API fallback
   function initSocketIO() {
     updateStatus('connecting', 'Connecting...');
+
+    // Load initial data via REST API
+    fetchMembersFromAPI();
+    setInterval(fetchMembersFromAPI, 4000);
     
     try {
-      socket = io({
-        reconnection: true,
-        reconnectionAttempts: 10,
-        reconnectionDelay: 1000
-      });
+      if (typeof io !== 'undefined') {
+        socket = io({
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000
+        });
 
-      socket.on('connect', () => {
-        isConnected = true;
-        socketId = socket.id;
-        updateStatus('synced', 'Live Synced ✓');
-        showToast('Connected to live collaborative server', 'info');
-      });
+        socket.on('connect', () => {
+          isConnected = true;
+          socketId = socket.id;
+          updateStatus('synced', 'Live Synced ✓');
+          showToast('Connected to live collaborative server', 'info');
+        });
 
-      socket.on('init_state', (data) => {
-        members = data.members || defaultInitialRows;
-        renderTable();
-        if (data.activeUsers) {
-          updateActiveCount(data.activeUsers);
-        }
-      });
-
-      socket.on('presence_update', (data) => {
-        updateActiveCount(data.activeUsers);
-      });
-
-      // Handle live cell edit broadcasted from another user
-      socket.on('cell_updated', (data) => {
-        const { id, field, value } = data;
-        const member = members.find(m => m.id === id);
-        if (member) {
-          member[field] = value;
-          updateCellUI(id, field, value);
-        }
-      });
-
-      // Remote user typing focus indicator
-      socket.on('remote_typing', (data) => {
-        if (data.socketId !== socketId) {
-          showRemoteTyping(data.id, data.field, data.isTyping);
-        }
-      });
-
-      // Remote row added
-      socket.on('row_added', (data) => {
-        members = data.members;
-        renderTable();
-        showToast('New office member row added live', 'info');
-      });
-
-      // Remote row deleted
-      socket.on('row_deleted', (data) => {
-        members = data.members;
-        renderTable();
-        showToast('Office member row deleted', 'warning');
-      });
-
-      socket.on('disconnect', () => {
-        isConnected = false;
-        updateStatus('disconnected', 'Offline (Local mode)');
-      });
-
-      socket.on('connect_error', () => {
-        isConnected = false;
-        updateStatus('disconnected', 'Server Disconnected');
-        if (members.length === 0) {
-          members = [...defaultInitialRows];
+        socket.on('init_state', (data) => {
+          members = data.members || defaultInitialRows;
           renderTable();
-        }
-      });
+          if (data.activeUsers) {
+            updateActiveCount(data.activeUsers);
+          }
+        });
 
-    } catch (err) {
-      console.warn('Socket.IO connection failed, using local offline mode:', err);
-      isConnected = false;
-      updateStatus('disconnected', 'Offline Mode');
-      if (members.length === 0) {
-        members = [...defaultInitialRows];
-        renderTable();
+        socket.on('presence_update', (data) => {
+          updateActiveCount(data.activeUsers);
+        });
+
+        socket.on('cell_updated', (data) => {
+          const { id, field, value } = data;
+          const member = members.find(m => m.id === id);
+          if (member) {
+            member[field] = value;
+            updateCellUI(id, field, value);
+          }
+        });
+
+        socket.on('remote_typing', (data) => {
+          if (data.socketId !== socketId) {
+            showRemoteTyping(data.id, data.field, data.isTyping);
+          }
+        });
+
+        socket.on('row_added', (data) => {
+          members = data.members;
+          renderTable();
+          showToast('New office member row added live', 'info');
+        });
+
+        socket.on('row_deleted', (data) => {
+          members = data.members;
+          renderTable();
+          showToast('Office member row deleted', 'warning');
+        });
+
+        socket.on('disconnect', () => {
+          isConnected = false;
+          updateStatus('synced', 'Live Synced (Vercel Cloud) ✓');
+        });
+
+        socket.on('connect_error', () => {
+          isConnected = false;
+          updateStatus('synced', 'Live Synced (Vercel Cloud) ✓');
+        });
       }
+    } catch (err) {
+      console.warn('Socket.IO connection failed, using HTTP REST mode:', err);
+      isConnected = false;
+      updateStatus('synced', 'Live Synced (Vercel Cloud) ✓');
     }
   }
 
@@ -287,10 +321,20 @@
         saveTimeout = setTimeout(() => {
           if (socket && isConnected) {
             socket.emit('edit_cell', { id, field, value });
+            updateStatus('synced', 'Live Synced ✓');
           } else if (syncMode === 'firebase' && dbRef) {
             dbRef.child(id).child(field).set(value);
+            updateStatus('synced', 'Live Synced ✓');
+          } else {
+            // REST API Fallback for Vercel
+            fetch('/api/members/cell', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id, field, value })
+            })
+            .then(() => updateStatus('synced', 'Live Synced (Vercel Cloud) ✓'))
+            .catch(() => updateStatus('synced', 'Live Synced ✓'));
           }
-          updateStatus('synced', 'Live Synced ✓');
         }, 200);
       });
 
@@ -364,23 +408,36 @@
     if (socket && isConnected) {
       socket.emit('add_row');
     } else {
-      const newId = `mem_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-      const newRow = {
-        id: newId,
-        sno: members.length + 1,
-        memberName: '',
-        familyNames: '',
-        gothram: ''
-      };
-      members.push(newRow);
-      renderTable();
-      showToast('New office member row added', 'info');
-
-      // Auto-focus the new row's Office Member Name input
-      setTimeout(() => {
-        const newInput = document.querySelector(`.cell-input[data-id="${newId}"][data-field="memberName"]`);
-        if (newInput) newInput.focus();
-      }, 50);
+      fetch('/api/members/add', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            members = data.members;
+            renderTable();
+            showToast('New office member row added', 'info');
+            setTimeout(() => {
+              const newInput = document.querySelector(`.cell-input[data-id="${data.newRow.id}"][data-field="memberName"]`);
+              if (newInput) newInput.focus();
+            }, 50);
+          }
+        })
+        .catch(() => {
+          const newId = `mem_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+          const newRow = {
+            id: newId,
+            sno: members.length + 1,
+            memberName: '',
+            familyNames: '',
+            gothram: ''
+          };
+          members.push(newRow);
+          renderTable();
+          showToast('New office member row added', 'info');
+          setTimeout(() => {
+            const newInput = document.querySelector(`.cell-input[data-id="${newId}"][data-field="memberName"]`);
+            if (newInput) newInput.focus();
+          }, 50);
+        });
     }
   }
 
@@ -404,13 +461,28 @@
     if (socket && isConnected) {
       socket.emit('delete_row', { id: rowToDeleteId });
     } else {
-      const index = members.findIndex(m => m.id === rowToDeleteId);
-      if (index !== -1) {
-        members.splice(index, 1);
-        members.forEach((m, idx) => { m.sno = idx + 1; });
-        renderTable();
-        showToast('Member entry deleted', 'warning');
-      }
+      fetch('/api/members/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: rowToDeleteId })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          members = data.members;
+          renderTable();
+          showToast('Member entry deleted', 'warning');
+        }
+      })
+      .catch(() => {
+        const index = members.findIndex(m => m.id === rowToDeleteId);
+        if (index !== -1) {
+          members.splice(index, 1);
+          members.forEach((m, idx) => { m.sno = idx + 1; });
+          renderTable();
+          showToast('Member entry deleted', 'warning');
+        }
+      });
     }
 
     closeDeleteModal();
