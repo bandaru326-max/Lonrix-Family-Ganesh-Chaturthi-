@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ganesh Chaturthi Family Details Entry | Live Collaborative Invitation</title>
+  
+  <!-- Google Fonts for Traditional Indian Invitation Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Poppins:wght@400;500;600;700&family=Rozha+One&family=Tiro+Telugu:ital@0;1&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="main-container">
+    
+    <!-- Invitation Header -->
+    <header class="invitation-header">
+      <div class="sacred-mantra">॥ శ్రీ గణేశాయ నమః ॥</div>
+      <h1 class="main-title">Ganesh Chaturthi Family Details</h1>
+      <div class="subtitle">
+        <span>గణేష్ చతుర్థి ఉత్సవముల కుటుంబ వివరాల నమోదు</span>
+      </div>
+    </header>
+
+    <!-- Top Action & Real-Time Status Bar -->
+    <div class="control-panel">
+      <div class="left-controls">
+        <button id="add-member-btn" class="btn btn-primary" title="Add a new office member row">
+          <i class="fa-solid fa-user-plus"></i> Add Office Member
+        </button>
+        <button id="export-csv-btn" class="btn btn-secondary" title="Download details in CSV/Excel format">
+          <i class="fa-solid fa-file-excel"></i> Export CSV
+        </button>
+        <button id="print-btn" class="btn btn-secondary" title="Print invitation family list">
+          <i class="fa-solid fa-print"></i> Print List
+        </button>
+      </div>
+
+      <div class="right-controls">
+        <!-- Search Filter -->
+        <div class="search-box">
+          <i class="fa-solid fa-magnifying-glass search-icon"></i>
+          <input type="text" id="search-input" class="search-input" placeholder="Search member, family, gothram...">
+        </div>
+
+        <!-- Live Connection Indicator -->
+        <div id="connection-status" class="status-badge" title="Real-time WebSocket server state">
+          <span class="pulse-dot"></span>
+          <span id="status-text">Connecting...</span>
+        </div>
+
+        <!-- Online Presence Count -->
+        <div class="online-users-tag" title="Connected active office members">
+          <i class="fa-solid fa-users"></i>
+          <span id="active-count">1 Online</span>
+        </div>
+
+        <!-- Backend Config Button -->
+        <button id="settings-btn" class="btn btn-secondary" style="padding: 9px 12px;" title="Firebase / Server Settings">
+          <i class="fa-solid fa-gear"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Excel-Style Collaborative Table Container -->
+    <main class="table-card">
+      <div class="table-responsive">
+        <table class="excel-table" id="family-table">
+          <thead>
+            <tr>
+              <th class="col-sno">S.No</th>
+              <th class="col-member"><i class="fa-solid fa-briefcase"></i> Office Member</th>
+              <th class="col-family"><i class="fa-solid fa-people-group"></i> Family Names</th>
+              <th class="col-gothram"><i class="fa-solid fa-scroll"></i> Gothram</th>
+              <th class="col-actions"><i class="fa-solid fa-sliders"></i></th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <!-- Table rows populated dynamically via app.js -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-footer">
+        <div class="row-count-info" id="row-count-text">
+          Showing 3 office member entries
+        </div>
+        <div>
+          <button id="add-member-footer-btn" class="btn btn-secondary" style="font-size: 0.85rem;">
+            <i class="fa-solid fa-plus"></i> Add Row
+          </button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Traditional Footer Banner -->
+    <footer class="page-footer">
+      <div class="blessing-text">॥ సర్వే జనాః సుఖినో భవంతు ॥</div>
+      <div>Office Ganesh Chaturthi Celebrations • Live Collaborative Family Register</div>
+    </footer>
+
+  </div>
+
+  <!-- Delete Row Confirmation Modal -->
+  <div class="modal-overlay" id="delete-modal">
+    <div class="modal-card">
+      <div class="modal-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+      <h3 class="modal-title">Delete Member Entry?</h3>
+      <p class="modal-desc" id="delete-modal-desc">
+        Are you sure you want to delete this office member entry? This action will sync live for all users.
+      </p>
+      <div class="modal-actions">
+        <button id="cancel-delete-btn" class="btn btn-secondary">Cancel</button>
+        <button id="confirm-delete-btn" class="btn btn-danger">Yes, Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Backend Settings Modal -->
+  <div class="modal-overlay" id="settings-modal">
+    <div class="modal-card settings-modal-card">
+      <h3 class="modal-title"><i class="fa-solid fa-network-wired"></i> Backend & Live Sync Settings</h3>
+      <p class="modal-desc" style="text-align: left; margin-bottom: 15px;">
+        Choose your real-time synchronization backend. Changes will apply immediately.
+      </p>
+      
+      <div class="form-group">
+        <label for="sync-mode-select">Real-time Engine:</label>
+        <select id="sync-mode-select" class="form-control">
+          <option value="socketio" selected>Socket.IO Server (Default Local & LAN Sync)</option>
+          <option value="firebase">Firebase Realtime Database (Cloud Sync)</option>
+        </select>
+      </div>
+
+      <div id="firebase-config-section" style="display: none; margin-top: 15px;">
+        <div class="form-group">
+          <label for="fb-db-url">Firebase Database URL:</label>
+          <input type="text" id="fb-db-url" class="form-control" placeholder="https://your-project-id.firebaseio.com">
+        </div>
+        <div class="form-group">
+          <label for="fb-api-key">Firebase API Key:</label>
+          <input type="text" id="fb-api-key" class="form-control" placeholder="AIzaSy...">
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top: 20px;">
+        <button id="close-settings-btn" class="btn btn-secondary">Cancel</button>
+        <button id="save-settings-btn" class="btn btn-primary">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Socket.IO Client Library (Loaded from server or CDN fallback) -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    if (typeof io === 'undefined') {
+      document.write('<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"><\/script>');
+    }
+  </script>
+
+  <!-- Firebase JS SDK (v10 modular/compat CDN for fallback cloud sync) -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+
+  <!-- Application Logic -->
+  <script src="app.js"></script>
+</body>
+</html>
